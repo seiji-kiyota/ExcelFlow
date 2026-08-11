@@ -1,0 +1,3 @@
+[theme]
+# Use a non-danger primary accent for main actions (e.g. データ整形を実行).
+primaryColor = "#1C83E1"

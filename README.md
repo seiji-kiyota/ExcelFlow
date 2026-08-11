@@ -22,18 +22,25 @@ Excel / CSV 形式の業務データをブラウザ上で読み込み、整形�
 ## 現在の開発状況
 
 **Phase 1：プロジェクト基盤** — 完了  
-**Phase 2：ファイル読込** — 実装済み
+**Phase 2：ファイル読込** — 完了  
+**Phase 3：データ整形** — 実装済み
 
 現在利用可能な機能:
 
 - Excel（.xlsx）読込
 - CSV読込（UTF-8 / UTF-8 BOM / CP932）
 - Excelシート選択
-- 行数・列数の表示
 - データプレビュー
-- 列名 / データ型の確認
+- 不要列削除
+- 列名変更
+- 空白行削除
+- 重複行削除
+- 文字列前後空白除去
+- 欠損値確認
+- 整形前後サマリー
+- 整形リセット
 
-Phase 3以降（データ整形・集計・グラフ・Excel出力）は未実装です。
+Phase 4以降（集計・グラフ・Excel出力）は未実装です。
 
 ## ローカル起動方法
 
@@ -43,6 +50,9 @@ pip install -r requirements.txt
 
 # アプリ起動
 streamlit run app.py
+
+# Windowsではダブルクリックでも起動できます
+run_ExcelFlow.bat
 ```
 
 サンプルデータ: `sample_data/sample_sales.xlsx` / `sample_data/sample_sales.csv`

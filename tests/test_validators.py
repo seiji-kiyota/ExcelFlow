@@ -8,7 +8,10 @@ import pytest
 from excel_flow.validators import (
     ExcelFlowError,
     get_extension,
+    has_cleaning_operations,
+    validate_columns_to_drop,
     validate_dataframe_not_empty,
+    validate_rename_mapping,
     validate_sheet_names,
     validate_supported_extension,
 )
@@ -54,3 +57,34 @@ def test_validate_empty_dataframe() -> None:
 
 def test_validate_non_empty_dataframe() -> None:
     validate_dataframe_not_empty(pd.DataFrame({"a": [1]}))
+
+
+def test_validate_columns_to_drop_ignores_unknown() -> None:
+    frame = pd.DataFrame({"a": [1], "b": [2]})
+    assert validate_columns_to_drop(frame, ["b", "missing"]) == ["b"]
+
+
+def test_validate_columns_to_drop_rejects_all() -> None:
+    frame = pd.DataFrame({"a": [1], "b": [2]})
+    with pytest.raises(ExcelFlowError) as exc_info:
+        validate_columns_to_drop(frame, ["a", "b"])
+    assert "すべての列を削除することはできません。" == exc_info.value.user_message
+
+
+def test_validate_rename_mapping_missing_source() -> None:
+    frame = pd.DataFrame({"a": [1]})
+    with pytest.raises(ExcelFlowError) as exc_info:
+        validate_rename_mapping(frame, {"missing": "x"})
+    assert "指定された列が見つかりません。" == exc_info.value.user_message
+
+
+def test_validate_rename_mapping_duplicate_targets() -> None:
+    frame = pd.DataFrame({"a": [1], "b": [2]})
+    with pytest.raises(ExcelFlowError) as exc_info:
+        validate_rename_mapping(frame, {"a": "x", "b": "x"})
+    assert "重複" in exc_info.value.user_message
+
+
+def test_has_cleaning_operations() -> None:
+    assert not has_cleaning_operations()
+    assert has_cleaning_operations(strip_whitespace=True)
