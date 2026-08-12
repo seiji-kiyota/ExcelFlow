@@ -50,6 +50,10 @@ def reset_aggregation_state(session_state: MutableMapping) -> None:
     session_state[AGGREGATION_METHOD_KEY] = AGGREGATION_METHOD_DEFAULT
     session_state[AGGREGATION_SORT_KEY] = AGGREGATION_SORT_DEFAULT
     session_state.pop(AGGREGATION_VALUE_KEY, None)
+    # Aggregation source changed: clear dependent Phase 5 chart state too.
+    from excel_flow.chart_builder import reset_chart_state
+
+    reset_chart_state(session_state)
 
 
 def get_numeric_columns(dataframe: pd.DataFrame) -> list[str]:

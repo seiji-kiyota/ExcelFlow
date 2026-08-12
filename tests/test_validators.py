@@ -11,6 +11,8 @@ from excel_flow.validators import (
     has_cleaning_operations,
     validate_aggregation_input,
     validate_aggregation_method,
+    validate_chart_input,
+    validate_chart_type,
     validate_columns_to_drop,
     validate_dataframe_not_empty,
     validate_group_columns,
@@ -113,3 +115,19 @@ def test_validate_aggregation_method_and_input() -> None:
     assert groups == ["部署"]
     assert method == "sum"
     assert column == "売上"
+
+
+def test_validate_chart_type_and_input() -> None:
+    frame = pd.DataFrame({"部署": ["A"], "件数": [1]})
+    assert validate_chart_type("BAR") == "bar"
+    method, x_name, y_name, color = validate_chart_input(
+        frame,
+        chart_type="bar",
+        x_column="部署",
+        y_column="件数",
+        numeric_columns=["件数"],
+    )
+    assert method == "bar"
+    assert x_name == "部署"
+    assert y_name == "件数"
+    assert color is None

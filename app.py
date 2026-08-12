@@ -1,7 +1,7 @@
 """ExcelFlow Streamlit UI entry point.
 
 Business logic lives in the ``excel_flow`` package.
-Phase 4 adds aggregation for Step 3.
+Phase 5 adds charts for Step 4.
 """
 
 from __future__ import annotations
@@ -22,6 +22,16 @@ from excel_flow.aggregator import (
     result_value_column_name,
     sort_aggregated,
 )
+from excel_flow.chart_builder import (
+    CHART_TITLE_KEY,
+    CHART_TYPE_KEY,
+    CHART_TYPE_OPTIONS,
+    CHART_X_KEY,
+    CHART_Y_KEY,
+    build_chart,
+    chart_settings_from_aggregation,
+    reset_chart_state,
+)
 from excel_flow.data_cleaner import clean_dataframe, summarize_missing_values
 from excel_flow.file_loader import (
     detect_file_format,
@@ -40,8 +50,8 @@ st.set_page_config(
 st.title("ExcelFlow")
 st.caption("Excel / CSV 業務自動化ツール")
 st.info(
-    "現在の開発状況：**Phase 4（集計）** — "
-    "ファイル読込・データ整形・集計が利用できます。"
+    "現在の開発状況：**Phase 5（グラフ）** — "
+    "ファイル読込・データ整形・集計・グラフが利用できます。"
 )
 
 AGGREGATION_OPTIONS = {
@@ -59,6 +69,25 @@ def _handle_aggregation_reset() -> None:
     """Button callback: runs before widgets are created on the next run."""
     reset_aggregation_state(st.session_state)
     st.session_state["aggregation_reset_notice"] = True
+
+
+def _handle_chart_reset() -> None:
+    """Button callback: clear Phase 5 only, keep aggregation results."""
+    reset_chart_state(st.session_state)
+    st.session_state["chart_reset_notice"] = True
+
+
+def _ensure_chart_widget_defaults(aggregation_config: dict) -> None:
+    """Set Phase 5 widget defaults before widgets are instantiated."""
+    defaults = chart_settings_from_aggregation(aggregation_config)
+    if CHART_TYPE_KEY not in st.session_state:
+        st.session_state[CHART_TYPE_KEY] = "棒グラフ"
+    if CHART_X_KEY not in st.session_state:
+        st.session_state[CHART_X_KEY] = defaults["x_column"]
+    if CHART_Y_KEY not in st.session_state:
+        st.session_state[CHART_Y_KEY] = defaults["y_column"]
+    if CHART_TITLE_KEY not in st.session_state:
+        st.session_state[CHART_TITLE_KEY] = defaults["title"]
 
 
 def _reset_cleaning_state() -> None:
@@ -382,6 +411,7 @@ else:
                     value_column=None if aggregation == "count" else value_column,
                 ),
             }
+            reset_chart_state(st.session_state)
             st.success("集計が完了しました。")
         except ExcelFlowError as exc:
             st.error(exc.user_message)
@@ -431,8 +461,128 @@ else:
 
 st.divider()
 
-with st.expander("④〜⑤ 今後の機能（未実装）", expanded=False):
-    st.write("④ グラフで確認する — Phase 5 で実装予定")
+# --- STEP 4 ---
+st.header("④ グラフで確認する")
+st.write("集計結果をもとに棒グラフ・折れ線グラフ・円グラフを表示します。")
+
+aggregated_df = st.session_state.get("aggregated_df")
+aggregation_config = st.session_state.get("aggregation_config")
+
+if aggregated_df is None or aggregation_config is None:
+    st.info("先に③集計するで集計を実行してください。")
+else:
+    if st.session_state.pop("chart_reset_notice", False):
+        st.success("グラフ設定をリセットしました。")
+
+    _ensure_chart_widget_defaults(aggregation_config)
+
+    group_columns = list(aggregation_config["group_columns"])
+    result_column = aggregation_config["result_column"]
+    color_column = group_columns[1] if len(group_columns) >= 2 else None
+    x_candidates = group_columns
+    y_candidates = [result_column]
+
+    chart_controls, _chart_spacer = st.columns([2, 1])
+    with chart_controls:
+        type_col, x_col, y_col = st.columns(3)
+        with type_col:
+            chart_type_label = st.selectbox(
+                "グラフ種類",
+                options=list(CHART_TYPE_OPTIONS.keys()),
+                key=CHART_TYPE_KEY,
+            )
+        chart_type = CHART_TYPE_OPTIONS[chart_type_label]
+
+        with x_col:
+            x_label = "カテゴリ" if chart_type == "pie" else "X軸"
+            x_column = st.selectbox(
+                x_label,
+                options=x_candidates,
+                key=CHART_X_KEY,
+            )
+        with y_col:
+            y_label = "値" if chart_type == "pie" else "Y軸"
+            y_column = st.selectbox(
+                y_label,
+                options=y_candidates,
+                key=CHART_Y_KEY,
+            )
+
+        chart_title = st.text_input("グラフタイトル", key=CHART_TITLE_KEY)
+
+        if color_column and chart_type != "pie":
+            st.caption(f"色分け：`{color_column}`（第2グループ項目）")
+        if chart_type == "pie" and color_column:
+            st.warning("円グラフは1つのグループ項目で集計した場合に利用できます。")
+
+        chart_action_cols = st.columns(2)
+        run_chart = chart_action_cols[0].button("グラフを表示", type="primary")
+        chart_action_cols[1].button(
+            "グラフをリセット",
+            type="secondary",
+            on_click=_handle_chart_reset,
+        )
+
+    if run_chart:
+        try:
+            if chart_type == "pie" and color_column:
+                raise ExcelFlowError("円グラフは1つのグループ項目で集計した場合に利用できます。")
+
+            ascending = st.session_state.get(AGGREGATION_SORT_KEY, "降順") == "昇順"
+            chart_source = sort_aggregated(
+                aggregated_df,
+                result_column,
+                ascending=ascending,
+            )
+            # Validate by building once; store settings for reruns.
+            build_chart(
+                chart_source,
+                chart_type=chart_type,
+                x_column=x_column,
+                y_column=y_column,
+                title=chart_title,
+                color_column=None if chart_type == "pie" else color_column,
+            )
+            st.session_state.chart_config = {
+                "chart_type": chart_type,
+                "x_column": x_column,
+                "y_column": y_column,
+                "title": chart_title,
+                "color_column": None if chart_type == "pie" else color_column,
+            }
+            st.session_state.chart_generated = True
+            st.success("グラフを表示しました。")
+        except ExcelFlowError as exc:
+            st.error(exc.user_message)
+        except Exception:
+            st.error("グラフ表示中に予期しないエラーが発生しました。")
+
+    if st.session_state.get("chart_generated") and st.session_state.get("chart_config"):
+        try:
+            ascending = st.session_state.get(AGGREGATION_SORT_KEY, "降順") == "昇順"
+            chart_source = sort_aggregated(
+                aggregated_df,
+                result_column,
+                ascending=ascending,
+            )
+            cfg = st.session_state.chart_config
+            figure = build_chart(
+                chart_source,
+                chart_type=cfg["chart_type"],
+                x_column=cfg["x_column"],
+                y_column=cfg["y_column"],
+                title=cfg.get("title", ""),
+                color_column=cfg.get("color_column"),
+            )
+            st.plotly_chart(figure, use_container_width=True)
+        except ExcelFlowError as exc:
+            st.error(exc.user_message)
+        except Exception:
+            st.error("グラフ表示中に予期しないエラーが発生しました。")
+
+st.divider()
+
+with st.expander("⑤ 今後の機能（未実装）", expanded=False):
     st.write("⑤ Excelへ出力する — Phase 6 で実装予定")
 
-st.caption("ExcelFlow Ver1.0 — Phase 4: 集計")
+st.caption("ExcelFlow Ver1.0 — Phase 5: グラフ")

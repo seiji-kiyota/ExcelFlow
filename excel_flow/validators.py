@@ -251,3 +251,86 @@ def validate_aggregation_input(
         numeric_columns=numeric_columns,
     )
     return groups, method, column
+
+
+SUPPORTED_CHART_TYPES = ("bar", "line", "pie")
+
+
+def validate_chart_type(chart_type: str | None) -> str:
+    """Validate chart type identifier."""
+    if chart_type is None or not str(chart_type).strip():
+        raise ExcelFlowError("グラフ種類を選択してください。")
+    normalized = str(chart_type).strip().lower()
+    if normalized not in SUPPORTED_CHART_TYPES:
+        raise ExcelFlowError(
+            "対応しているグラフ種類は 棒グラフ / 折れ線グラフ / 円グラフ です。",
+            detail=f"unsupported chart_type: {normalized}",
+        )
+    return normalized
+
+
+def validate_chart_column(
+    dataframe: pd.DataFrame,
+    column_name: str | None,
+    *,
+    label: str,
+    require_numeric: bool = False,
+    numeric_columns: list[str] | None = None,
+) -> str:
+    """Validate that a chart axis/category column exists (and is numeric if required)."""
+    if column_name is None or not str(column_name).strip():
+        raise ExcelFlowError(f"{label}を選択してください。")
+
+    column = str(column_name)
+    existing = set(dataframe.columns.astype(str))
+    if column not in existing:
+        raise ExcelFlowError(
+            "指定された列が見つかりません。",
+            detail=f"missing chart column: {column}",
+        )
+
+    if require_numeric:
+        allowed = numeric_columns or []
+        if column not in allowed:
+            raise ExcelFlowError(
+                "値（Y軸）には数値列のみ指定できます。",
+                detail=f"non-numeric chart column: {column}",
+            )
+    return column
+
+
+def validate_chart_input(
+    dataframe: pd.DataFrame,
+    *,
+    chart_type: str | None,
+    x_column: str | None,
+    y_column: str | None,
+    color_column: str | None = None,
+    numeric_columns: list[str],
+) -> tuple[str, str, str, str | None]:
+    """Validate chart settings and return normalized values."""
+    if dataframe is None or dataframe.empty:
+        raise ExcelFlowError("グラフ化できる集計結果がありません。")
+
+    method = validate_chart_type(chart_type)
+    x_name = validate_chart_column(dataframe, x_column, label="カテゴリ（X軸）")
+    y_name = validate_chart_column(
+        dataframe,
+        y_column,
+        label="値（Y軸）",
+        require_numeric=True,
+        numeric_columns=numeric_columns,
+    )
+
+    color_name: str | None = None
+    if color_column is not None and str(color_column).strip():
+        color_name = validate_chart_column(
+            dataframe,
+            color_column,
+            label="色分け項目",
+        )
+
+    if method == "pie" and color_name is not None:
+        raise ExcelFlowError("円グラフは1つのグループ項目で集計した場合に利用できます。")
+
+    return method, x_name, y_name, color_name
