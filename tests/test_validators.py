@@ -15,6 +15,8 @@ from excel_flow.validators import (
     validate_chart_type,
     validate_columns_to_drop,
     validate_dataframe_not_empty,
+    validate_export_filename,
+    validate_export_selection,
     validate_group_columns,
     validate_rename_mapping,
     validate_sheet_names,
@@ -131,3 +133,18 @@ def test_validate_chart_type_and_input() -> None:
     assert x_name == "部署"
     assert y_name == "件数"
     assert color is None
+
+
+def test_validate_export_filename_and_selection() -> None:
+    assert validate_export_filename("report") == "report.xlsx"
+    with pytest.raises(ExcelFlowError):
+        validate_export_filename("a/b")
+    frame = pd.DataFrame({"a": [1]})
+    include_data, include_agg, include_history = validate_export_selection(
+        data_df=frame,
+        aggregated_df=None,
+        include_data=True,
+        include_aggregated=False,
+        include_history=True,
+    )
+    assert include_data and include_history and not include_agg

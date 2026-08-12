@@ -34,6 +34,7 @@ def reset_chart_state(session_state: MutableMapping) -> None:
     """Clear Phase 5 chart settings/widgets without touching aggregation data.
 
     Call before Phase 5 widgets are instantiated (e.g. button ``on_click``).
+    Also clears Phase 6 export artifacts because chart changes affect history.
     """
     for key in (
         "chart_config",
@@ -44,6 +45,9 @@ def reset_chart_state(session_state: MutableMapping) -> None:
         CHART_TITLE_KEY,
     ):
         session_state.pop(key, None)
+    from excel_flow.excel_exporter import reset_export_state
+
+    reset_export_state(session_state)
 
 
 def build_default_chart_title(

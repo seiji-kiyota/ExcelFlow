@@ -1,7 +1,7 @@
 """ExcelFlow Streamlit UI entry point.
 
 Business logic lives in the ``excel_flow`` package.
-Phase 5 adds charts for Step 4.
+Phase 6 adds Excel export for Step 5.
 """
 
 from __future__ import annotations
@@ -33,6 +33,22 @@ from excel_flow.chart_builder import (
     reset_chart_state,
 )
 from excel_flow.data_cleaner import clean_dataframe, summarize_missing_values
+from excel_flow.excel_exporter import (
+    EXPORT_BYTES_KEY,
+    EXPORT_FILENAME_KEY,
+    EXPORT_INCLUDE_AGG_KEY,
+    EXPORT_INCLUDE_DATA_KEY,
+    EXPORT_INCLUDE_HISTORY_KEY,
+    EXPORT_READY_FILENAME_KEY,
+    build_excel_workbook,
+    build_process_history_from_session,
+    clear_export_artifacts,
+    generate_default_filename,
+    is_export_ready,
+    normalize_export_filename,
+    reset_export_state,
+    store_export_result,
+)
 from excel_flow.file_loader import (
     detect_file_format,
     get_excel_sheet_names,
@@ -50,8 +66,8 @@ st.set_page_config(
 st.title("ExcelFlow")
 st.caption("Excel / CSV 業務自動化ツール")
 st.info(
-    "現在の開発状況：**Phase 5（グラフ）** — "
-    "ファイル読込・データ整形・集計・グラフが利用できます。"
+    "現在の開発状況：**Phase 6（Excel出力）** — "
+    "読込・整形・集計・グラフ・Excel出力まで利用できます。"
 )
 
 AGGREGATION_OPTIONS = {
@@ -77,6 +93,12 @@ def _handle_chart_reset() -> None:
     st.session_state["chart_reset_notice"] = True
 
 
+def _handle_export_reset() -> None:
+    """Button callback: clear Phase 6 only, keep upstream results."""
+    reset_export_state(st.session_state)
+    st.session_state["export_reset_notice"] = True
+
+
 def _ensure_chart_widget_defaults(aggregation_config: dict) -> None:
     """Set Phase 5 widget defaults before widgets are instantiated."""
     defaults = chart_settings_from_aggregation(aggregation_config)
@@ -94,6 +116,7 @@ def _reset_cleaning_state() -> None:
     for key in (
         "cleaned_df",
         "cleaning_summary",
+        "cleaning_config",
         "rename_mapping",
         "pending_rename_source",
         "pending_rename_target",
@@ -140,6 +163,11 @@ if uploaded_file is not None:
         if st.session_state.get("loaded_file_key") != file_key:
             st.session_state.loaded_file_key = file_key
             st.session_state.original_df = loaded_df.copy()
+            st.session_state.loaded_file_meta = {
+                "filename": uploaded_file.name,
+                "file_format": file_format,
+                "sheet_name": selected_sheet,
+            }
             _reset_cleaning_state()
 
         original_df = st.session_state.original_df
@@ -173,6 +201,7 @@ if uploaded_file is not None:
 else:
     st.session_state.pop("loaded_file_key", None)
     st.session_state.pop("original_df", None)
+    st.session_state.pop("loaded_file_meta", None)
     _reset_cleaning_state()
 
 st.divider()
@@ -267,6 +296,13 @@ else:
             )
             st.session_state.cleaned_df = cleaned_df
             st.session_state.cleaning_summary = summary
+            st.session_state.cleaning_config = {
+                "columns_to_drop": list(columns_to_drop),
+                "rename_mapping": dict(active_renames),
+                "strip_whitespace": strip_whitespace,
+                "remove_blank_rows": remove_blank_rows,
+                "remove_duplicates": remove_duplicates,
+            }
             reset_aggregation_state(st.session_state)
             st.success("データ整形が完了しました。")
         except ExcelFlowError as exc:
@@ -551,6 +587,7 @@ else:
                 "color_column": None if chart_type == "pie" else color_column,
             }
             st.session_state.chart_generated = True
+            reset_export_state(st.session_state)
             st.success("グラフを表示しました。")
         except ExcelFlowError as exc:
             st.error(exc.user_message)
@@ -582,7 +619,123 @@ else:
 
 st.divider()
 
-with st.expander("⑤ 今後の機能（未実装）", expanded=False):
-    st.write("⑤ Excelへ出力する — Phase 6 で実装予定")
+# --- STEP 5 ---
+st.header("⑤ Excelへ出力する")
+st.write("整形済データ・集計結果・処理履歴を Excel ファイルとしてダウンロードします。")
 
-st.caption("ExcelFlow Ver1.0 — Phase 5: グラフ")
+if original_df is None:
+    st.info("先にファイルを読み込んでください。")
+else:
+    if st.session_state.pop("export_reset_notice", False):
+        st.success("出力設定をリセットしました。")
+
+    cleaned_df = st.session_state.get("cleaned_df")
+    aggregated_df = st.session_state.get("aggregated_df")
+    aggregation_config = st.session_state.get("aggregation_config")
+    export_source_df = cleaned_df if cleaned_df is not None else original_df
+    export_source_label = "整形済データ" if cleaned_df is not None else "元データ"
+
+    st.info(
+        f"出力対象：**{export_source_label}**"
+        f"（{len(export_source_df):,}行 × {len(export_source_df.columns):,}列）"
+    )
+
+    if EXPORT_FILENAME_KEY not in st.session_state:
+        st.session_state[EXPORT_FILENAME_KEY] = generate_default_filename()
+    if EXPORT_INCLUDE_DATA_KEY not in st.session_state:
+        st.session_state[EXPORT_INCLUDE_DATA_KEY] = True
+    if EXPORT_INCLUDE_AGG_KEY not in st.session_state:
+        st.session_state[EXPORT_INCLUDE_AGG_KEY] = aggregated_df is not None
+    if EXPORT_INCLUDE_HISTORY_KEY not in st.session_state:
+        st.session_state[EXPORT_INCLUDE_HISTORY_KEY] = True
+
+    export_controls, _export_spacer = st.columns([2, 1])
+    with export_controls:
+        st.text_input("出力ファイル名", key=EXPORT_FILENAME_KEY)
+
+        include_cols = st.columns(3)
+        with include_cols[0]:
+            include_data = st.checkbox("整形済データ", key=EXPORT_INCLUDE_DATA_KEY)
+        with include_cols[1]:
+            include_aggregated = st.checkbox(
+                "集計結果",
+                key=EXPORT_INCLUDE_AGG_KEY,
+                disabled=aggregated_df is None,
+            )
+        with include_cols[2]:
+            include_history = st.checkbox("処理履歴", key=EXPORT_INCLUDE_HISTORY_KEY)
+
+        export_action_cols = st.columns(2)
+        run_export = export_action_cols[0].button("Excelファイルを作成", type="primary")
+        export_action_cols[1].button(
+            "出力をリセット",
+            type="secondary",
+            on_click=_handle_export_reset,
+        )
+
+    if run_export:
+        # Prevent stale downloadables from surviving a failed recreate.
+        clear_export_artifacts(st.session_state)
+        try:
+            filename = normalize_export_filename(st.session_state.get(EXPORT_FILENAME_KEY))
+            ascending = st.session_state.get(AGGREGATION_SORT_KEY, "降順") == "昇順"
+            sorted_aggregated = None
+            if aggregated_df is not None and aggregation_config is not None:
+                sorted_aggregated = sort_aggregated(
+                    aggregated_df,
+                    aggregation_config["result_column"],
+                    ascending=ascending,
+                )
+
+            history_df = build_process_history_from_session(
+                {
+                    "file_meta": st.session_state.get("loaded_file_meta") or {},
+                    "original_df": original_df,
+                    "cleaned_df": cleaned_df,
+                    "cleaning_summary": st.session_state.get("cleaning_summary"),
+                    "cleaning_config": st.session_state.get("cleaning_config"),
+                    "aggregated_df": sorted_aggregated,
+                    "aggregation_config": aggregation_config,
+                    "chart_config": st.session_state.get("chart_config"),
+                    "chart_generated": st.session_state.get("chart_generated"),
+                    "data_source_label": export_source_label,
+                    "sort_label": st.session_state.get(AGGREGATION_SORT_KEY, "降順"),
+                }
+            )
+
+            buffer = build_excel_workbook(
+                export_source_df,
+                aggregated_df=sorted_aggregated,
+                process_history=history_df,
+                include_data=include_data,
+                include_aggregated=include_aggregated and sorted_aggregated is not None,
+                include_history=include_history,
+            )
+            store_export_result(
+                st.session_state,
+                export_bytes=buffer.getvalue(),
+                filename=filename,
+                export_config={
+                    "include_data": include_data,
+                    "include_aggregated": include_aggregated and sorted_aggregated is not None,
+                    "include_history": include_history,
+                    "source_label": export_source_label,
+                },
+            )
+            st.success("Excelファイルを作成しました。")
+        except ExcelFlowError as exc:
+            clear_export_artifacts(st.session_state)
+            st.error(exc.user_message)
+        except Exception:
+            clear_export_artifacts(st.session_state)
+            st.error("Excelファイルを作成できませんでした。")
+
+    if is_export_ready(st.session_state):
+        st.download_button(
+            label="Excelファイルをダウンロード",
+            data=st.session_state[EXPORT_BYTES_KEY],
+            file_name=st.session_state[EXPORT_READY_FILENAME_KEY],
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+st.caption("ExcelFlow Ver1.0 — Phase 6: Excel出力")

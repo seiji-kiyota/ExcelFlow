@@ -334,3 +334,66 @@ def validate_chart_input(
         raise ExcelFlowError("円グラフは1つのグループ項目で集計した場合に利用できます。")
 
     return method, x_name, y_name, color_name
+
+
+INVALID_FILENAME_CHARS = set('\\/:*?"<>|')
+
+
+def validate_export_filename(filename: str | None) -> str:
+    """Validate and normalize an export filename ending with ``.xlsx``."""
+    if filename is None or not str(filename).strip():
+        raise ExcelFlowError("ファイル名を入力してください。")
+
+    name = str(filename).strip()
+    if any(char in INVALID_FILENAME_CHARS for char in name):
+        raise ExcelFlowError("ファイル名に使用できない文字が含まれています。")
+
+    # Prevent path segments.
+    if "/" in name or "\\" in name:
+        raise ExcelFlowError("ファイル名に使用できない文字が含まれています。")
+
+    lower = name.lower()
+    if lower.endswith(".xlsx"):
+        normalized = name
+    elif lower.endswith(".xls"):
+        raise ExcelFlowError("出力ファイル形式は .xlsx のみ対応しています。")
+    else:
+        normalized = f"{name}.xlsx"
+
+    stem = normalized[:-5]
+    if not stem.strip():
+        raise ExcelFlowError("ファイル名を入力してください。")
+    if stem.lower().endswith(".xlsx"):
+        # Avoid names like report.xlsx.xlsx from odd input handling.
+        normalized = stem if stem.lower().endswith(".xlsx") else normalized
+
+    # Collapse accidental duplicated extension: file.xlsx.xlsx
+    while normalized.lower().endswith(".xlsx.xlsx"):
+        normalized = normalized[:-5]
+
+    return normalized
+
+
+def validate_export_selection(
+    *,
+    data_df: pd.DataFrame | None,
+    aggregated_df: pd.DataFrame | None,
+    include_data: bool,
+    include_aggregated: bool,
+    include_history: bool,
+) -> tuple[bool, bool, bool]:
+    """Validate which sheets should be written to the export workbook."""
+    if not any([include_data, include_aggregated, include_history]):
+        raise ExcelFlowError("出力する内容を1つ以上選択してください。")
+
+    if include_data:
+        if data_df is None or data_df.empty:
+            raise ExcelFlowError("出力できるデータがありません。")
+
+    if include_aggregated:
+        if aggregated_df is None:
+            raise ExcelFlowError("集計結果がありません。先に集計を実行してください。")
+        if aggregated_df.empty:
+            raise ExcelFlowError("集計結果が空のため出力できません。")
+
+    return include_data, include_aggregated, include_history
