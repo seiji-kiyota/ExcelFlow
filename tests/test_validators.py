@@ -9,8 +9,11 @@ from excel_flow.validators import (
     ExcelFlowError,
     get_extension,
     has_cleaning_operations,
+    validate_aggregation_input,
+    validate_aggregation_method,
     validate_columns_to_drop,
     validate_dataframe_not_empty,
+    validate_group_columns,
     validate_rename_mapping,
     validate_sheet_names,
     validate_supported_extension,
@@ -88,3 +91,25 @@ def test_validate_rename_mapping_duplicate_targets() -> None:
 def test_has_cleaning_operations() -> None:
     assert not has_cleaning_operations()
     assert has_cleaning_operations(strip_whitespace=True)
+
+
+def test_validate_group_columns_duplicate() -> None:
+    frame = pd.DataFrame({"部署": ["A"], "商品": ["B"]})
+    with pytest.raises(ExcelFlowError) as exc_info:
+        validate_group_columns(frame, ["部署", "部署"])
+    assert "重複" in exc_info.value.user_message
+
+
+def test_validate_aggregation_method_and_input() -> None:
+    frame = pd.DataFrame({"部署": ["A"], "売上": [1]})
+    assert validate_aggregation_method("SUM") == "sum"
+    groups, method, column = validate_aggregation_input(
+        frame,
+        group_columns=["部署"],
+        aggregation="sum",
+        value_column="売上",
+        numeric_columns=["売上"],
+    )
+    assert groups == ["部署"]
+    assert method == "sum"
+    assert column == "売上"

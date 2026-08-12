@@ -160,3 +160,94 @@ def has_cleaning_operations(
         or drop_blank_rows
         or drop_duplicates
     )
+
+
+SUPPORTED_AGGREGATIONS = ("sum", "mean", "count", "max", "min")
+
+
+def validate_group_columns(
+    dataframe: pd.DataFrame,
+    group_columns: list[str] | None,
+) -> list[str]:
+    """Validate group-by columns (1 or 2 unique existing columns)."""
+    if not group_columns:
+        raise ExcelFlowError("グループ項目を1つ以上選択してください。")
+
+    normalized = [str(column) for column in group_columns]
+    if len(normalized) != len(set(normalized)):
+        raise ExcelFlowError("グループ項目に同じ列を重複して指定できません。")
+    if len(normalized) > 2:
+        raise ExcelFlowError("グループ項目は最大2列まで選択できます。")
+
+    existing = set(dataframe.columns.astype(str))
+    for column in normalized:
+        if column not in existing:
+            raise ExcelFlowError(
+                "指定された列が見つかりません。",
+                detail=f"missing group column: {column}",
+            )
+    return normalized
+
+
+def validate_aggregation_method(aggregation: str | None) -> str:
+    """Validate aggregation method identifier."""
+    if aggregation is None or not str(aggregation).strip():
+        raise ExcelFlowError("集計方法を選択してください。")
+    method = str(aggregation).strip().lower()
+    if method not in SUPPORTED_AGGREGATIONS:
+        raise ExcelFlowError(
+            "対応している集計方法は 合計 / 平均 / 件数 / 最大 / 最小 です。",
+            detail=f"unsupported aggregation: {method}",
+        )
+    return method
+
+
+def validate_value_column(
+    dataframe: pd.DataFrame,
+    value_column: str | None,
+    *,
+    numeric_columns: list[str],
+) -> str:
+    """Validate a numeric value column used by sum/mean/max/min."""
+    if value_column is None or not str(value_column).strip():
+        raise ExcelFlowError("集計対象列を選択してください。")
+
+    column = str(value_column)
+    existing = set(dataframe.columns.astype(str))
+    if column not in existing:
+        raise ExcelFlowError(
+            "指定された列が見つかりません。",
+            detail=f"missing value column: {column}",
+        )
+    if column not in numeric_columns:
+        raise ExcelFlowError(
+            "合計・平均・最大・最小には数値列のみ指定できます。",
+            detail=f"non-numeric column: {column}",
+        )
+    return column
+
+
+def validate_aggregation_input(
+    dataframe: pd.DataFrame,
+    *,
+    group_columns: list[str] | None,
+    aggregation: str | None,
+    value_column: str | None,
+    numeric_columns: list[str],
+) -> tuple[list[str], str, str | None]:
+    """Validate full aggregation settings and return normalized values."""
+    if dataframe is None or dataframe.empty:
+        raise ExcelFlowError("集計できるデータがありません。")
+
+    groups = validate_group_columns(dataframe, group_columns)
+    method = validate_aggregation_method(aggregation)
+
+    if method == "count":
+        return groups, method, None
+
+    column = validate_value_column(
+        dataframe,
+        value_column,
+        numeric_columns=numeric_columns,
+    )
+    return groups, method, column

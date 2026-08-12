@@ -1,13 +1,27 @@
 """ExcelFlow Streamlit UI entry point.
 
 Business logic lives in the ``excel_flow`` package.
-Phase 3 adds data cleaning for Step 2.
+Phase 4 adds aggregation for Step 3.
 """
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
+from excel_flow.aggregator import (
+    AGGREGATION_GROUP_KEY,
+    AGGREGATION_LABELS,
+    AGGREGATION_METHOD_KEY,
+    AGGREGATION_SORT_KEY,
+    AGGREGATION_VALUE_KEY,
+    aggregate_data,
+    describe_aggregation,
+    get_numeric_columns,
+    reset_aggregation_state,
+    result_value_column_name,
+    sort_aggregated,
+)
 from excel_flow.data_cleaner import clean_dataframe, summarize_missing_values
 from excel_flow.file_loader import (
     detect_file_format,
@@ -26,9 +40,25 @@ st.set_page_config(
 st.title("ExcelFlow")
 st.caption("Excel / CSV 業務自動化ツール")
 st.info(
-    "現在の開発状況：**Phase 3（データ整形）** — "
-    "ファイル読込とデータ整形が利用できます。"
+    "現在の開発状況：**Phase 4（集計）** — "
+    "ファイル読込・データ整形・集計が利用できます。"
 )
+
+AGGREGATION_OPTIONS = {
+    "合計": "sum",
+    "平均": "mean",
+    "件数": "count",
+    "最大": "max",
+    "最小": "min",
+}
+
+AGGREGATION_RESULT_WIDTH = 800
+
+
+def _handle_aggregation_reset() -> None:
+    """Button callback: runs before widgets are created on the next run."""
+    reset_aggregation_state(st.session_state)
+    st.session_state["aggregation_reset_notice"] = True
 
 
 def _reset_cleaning_state() -> None:
@@ -40,6 +70,7 @@ def _reset_cleaning_state() -> None:
         "pending_rename_target",
     ):
         st.session_state.pop(key, None)
+    reset_aggregation_state(st.session_state)
 
 
 def _init_rename_mapping() -> dict[str, str]:
@@ -95,7 +126,7 @@ if uploaded_file is not None:
         if selected_sheet:
             info_cols[3].metric("シート", selected_sheet)
 
-        with st.expander("元データのプレビュー / 列情報", expanded=True):
+        with st.expander("元データのプレビュー / 列情報", expanded=False):
             st.caption("先頭30行を表示しています。")
             st.dataframe(original_df.head(30), use_container_width=True)
             st.dataframe(
@@ -196,7 +227,6 @@ else:
     if run_cleaning:
         try:
             active_renames = st.session_state.get("rename_mapping", {})
-            # Multiselect uses original column names; map them after renames.
             effective_drop = [active_renames.get(column, column) for column in columns_to_drop]
             cleaned_df, summary = clean_dataframe(
                 original_df,
@@ -208,6 +238,7 @@ else:
             )
             st.session_state.cleaned_df = cleaned_df
             st.session_state.cleaning_summary = summary
+            reset_aggregation_state(st.session_state)
             st.success("データ整形が完了しました。")
         except ExcelFlowError as exc:
             st.error(exc.user_message)
@@ -218,43 +249,190 @@ else:
     summary = st.session_state.get("cleaning_summary")
 
     if cleaned_df is not None and summary is not None:
-        st.subheader("整形結果")
-        st.write(
-            f"整形前：{summary['original_rows']:,}行 × {summary['original_columns']:,}列  →  "
-            f"整形後：{summary['cleaned_rows']:,}行 × {summary['cleaned_columns']:,}列"
-        )
-
-        metric_cols = st.columns(4)
-        metric_cols[0].metric("削除行数", f"{summary['removed_rows']:,}")
-        metric_cols[1].metric("削除列数", f"{summary['removed_columns']:,}")
-        metric_cols[2].metric("空白行削除", f"{summary['blank_rows_removed']:,}")
-        metric_cols[3].metric("重複削除", f"{summary['duplicates_removed']:,}")
-
-        st.subheader("整形済データのプレビュー")
-        st.caption("先頭30行を表示しています。元データとは別の結果です。")
-        st.dataframe(cleaned_df.head(30), use_container_width=True)
-
-        result_tabs = st.tabs(["欠損値一覧", "列名 / データ型"])
-        with result_tabs[0]:
-            st.dataframe(
-                summarize_missing_values(cleaned_df),
-                use_container_width=True,
-                hide_index=True,
+        with st.expander("整形結果", expanded=True):
+            st.write(
+                f"整形前：{summary['original_rows']:,}行 × {summary['original_columns']:,}列  →  "
+                f"整形後：{summary['cleaned_rows']:,}行 × {summary['cleaned_columns']:,}列"
             )
-            st.caption("欠損は NaN / None / NaT のみを集計しています（空白文字列は含みません）。")
-        with result_tabs[1]:
-            st.dataframe(
-                summarize_columns(cleaned_df),
-                use_container_width=True,
-                hide_index=True,
-            )
+
+            metric_cols = st.columns(4)
+            metric_cols[0].metric("削除行数", f"{summary['removed_rows']:,}")
+            metric_cols[1].metric("削除列数", f"{summary['removed_columns']:,}")
+            metric_cols[2].metric("空白行削除", f"{summary['blank_rows_removed']:,}")
+            metric_cols[3].metric("重複削除", f"{summary['duplicates_removed']:,}")
+
+            st.caption("整形済データのプレビュー（先頭30行）")
+            st.dataframe(cleaned_df.head(30), use_container_width=True)
+
+            result_tabs = st.tabs(["欠損値一覧", "列名 / データ型"])
+            with result_tabs[0]:
+                st.dataframe(
+                    summarize_missing_values(cleaned_df),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.caption("欠損は NaN / None / NaT のみを集計しています（空白文字列は含みません）。")
+            with result_tabs[1]:
+                st.dataframe(
+                    summarize_columns(cleaned_df),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
 st.divider()
 
-# --- Later phases (compact) ---
-with st.expander("③〜⑤ 今後の機能（未実装）", expanded=False):
-    st.write("③ 集計する — Phase 4 で実装予定")
+# --- STEP 3 ---
+st.header("③ 集計する")
+st.write("グループ項目と集計方法を指定して、データを集計します。")
+
+if original_df is None:
+    st.info("先にファイルを読み込んでください。")
+else:
+    cleaned_df = st.session_state.get("cleaned_df")
+    if cleaned_df is not None:
+        source_df = cleaned_df
+        source_label = "整形済データ"
+    else:
+        source_df = original_df
+        source_label = "元データ"
+
+    if st.session_state.pop("aggregation_reset_notice", False):
+        st.success("集計結果をリセットしました。")
+
+    st.info(f"集計対象：**{source_label}**（{len(source_df):,}行 × {len(source_df.columns):,}列）")
+
+    # Keep Phase 4 controls compact (not full-page width).
+    controls_left, _controls_spacer = st.columns([2, 1])
+    with controls_left:
+        group_columns = st.multiselect(
+            "グループ項目（最大2列）",
+            options=list(source_df.columns.astype(str)),
+            default=[],
+            max_selections=2,
+            help="集計の軸となる列を1〜2つ選択します。",
+            key=AGGREGATION_GROUP_KEY,
+        )
+
+        method_col, value_col_ui = st.columns(2)
+        with method_col:
+            method_label = st.selectbox(
+                "集計方法",
+                options=list(AGGREGATION_OPTIONS.keys()),
+                index=0,
+                key=AGGREGATION_METHOD_KEY,
+            )
+        aggregation = AGGREGATION_OPTIONS[method_label]
+
+        value_column: str | None = None
+        numeric_columns = get_numeric_columns(source_df)
+
+        with value_col_ui:
+            if aggregation == "count":
+                st.caption("件数：グループごとの行数を集計します。")
+            else:
+                if not numeric_columns:
+                    st.warning("数値列がないため、合計・平均・最大・最小は実行できません。")
+                value_column = st.selectbox(
+                    "集計対象列",
+                    options=numeric_columns or [""],
+                    disabled=not numeric_columns,
+                    key=AGGREGATION_VALUE_KEY,
+                )
+
+        sort_label = st.radio(
+            "並べ替え（集計値）",
+            options=["降順", "昇順"],
+            index=0,
+            horizontal=True,
+            key=AGGREGATION_SORT_KEY,
+        )
+
+        agg_action_cols = st.columns(2)
+        run_aggregation = agg_action_cols[0].button("集計を実行", type="primary")
+        # on_click runs before widgets are created, avoiding StreamlitAPIException.
+        agg_action_cols[1].button(
+            "集計をリセット",
+            type="secondary",
+            on_click=_handle_aggregation_reset,
+        )
+
+    if run_aggregation:
+        try:
+            result_df = aggregate_data(
+                source_df,
+                group_columns=group_columns,
+                aggregation=aggregation,
+                value_column=None if aggregation == "count" else value_column,
+            )
+            result_column = result_value_column_name(
+                aggregation,
+                None if aggregation == "count" else value_column,
+            )
+            st.session_state.aggregated_df = result_df
+            st.session_state.aggregation_config = {
+                "source_label": source_label,
+                "group_columns": list(group_columns),
+                "aggregation": aggregation,
+                "aggregation_label": AGGREGATION_LABELS[aggregation],
+                "value_column": None if aggregation == "count" else value_column,
+                "result_column": result_column,
+                "description": describe_aggregation(
+                    group_columns=list(group_columns),
+                    aggregation=aggregation,
+                    value_column=None if aggregation == "count" else value_column,
+                ),
+            }
+            st.success("集計が完了しました。")
+        except ExcelFlowError as exc:
+            st.error(exc.user_message)
+        except Exception:
+            st.error("集計中に予期しないエラーが発生しました。")
+
+    aggregated_df = st.session_state.get("aggregated_df")
+    aggregation_config = st.session_state.get("aggregation_config")
+
+    if aggregated_df is not None and aggregation_config is not None:
+        ascending = sort_label == "昇順"
+        display_df = sort_aggregated(
+            aggregated_df,
+            aggregation_config["result_column"],
+            ascending=ascending,
+        )
+
+        st.subheader("集計結果")
+        st.write(f"集計条件：{aggregation_config['description']}")
+        st.write(f"集計対象：{aggregation_config['source_label']}")
+        st.write(f"結果：{len(display_df):,}グループ")
+
+        # Equal-ish column widths inside the fixed 800px table; numbers left-aligned.
+        # display_df is view-only; aggregated_df numeric types remain unchanged.
+        equal_width = max(160, AGGREGATION_RESULT_WIDTH // max(len(display_df.columns), 1))
+        column_config = {}
+        for column_name in display_df.columns:
+            if pd.api.types.is_numeric_dtype(display_df[column_name]):
+                column_config[column_name] = st.column_config.NumberColumn(
+                    str(column_name),
+                    width=equal_width,
+                    alignment="left",
+                )
+            else:
+                column_config[column_name] = st.column_config.TextColumn(
+                    str(column_name),
+                    width=equal_width,
+                    alignment="left",
+                )
+
+        st.dataframe(
+            display_df,
+            width=AGGREGATION_RESULT_WIDTH,
+            hide_index=True,
+            column_config=column_config,
+        )
+
+st.divider()
+
+with st.expander("④〜⑤ 今後の機能（未実装）", expanded=False):
     st.write("④ グラフで確認する — Phase 5 で実装予定")
     st.write("⑤ Excelへ出力する — Phase 6 で実装予定")
 
-st.caption("ExcelFlow Ver1.0 — Phase 3: データ整形")
+st.caption("ExcelFlow Ver1.0 — Phase 4: 集計")
