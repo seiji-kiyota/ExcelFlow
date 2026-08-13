@@ -4,6 +4,14 @@
 
 Excel / CSV の読込・整形・集計・グラフ・Excel出力を行う、Streamlit ベースの業務自動化デモツールです。
 
+## デモ
+
+Streamlit Community Cloud で公開しています。
+
+https://excelflow-demo.streamlit.app
+
+Excel / CSV ファイルをアップロードして、読込・整形・集計・グラフ・Excel出力をブラウザ上で試せます。
+
 ## 主な機能
 
 - Excel / CSV 読込
