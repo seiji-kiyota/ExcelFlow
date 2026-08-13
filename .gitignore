@@ -61,3 +61,7 @@ Desktop.ini
 *.log
 tmp/
 temp/
+
+# Local export artifacts (keep sample_data/*.xlsx tracked)
+ExcelFlow_Result_*.xlsx
+~$*

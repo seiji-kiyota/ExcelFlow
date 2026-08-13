@@ -1,7 +1,6 @@
 """ExcelFlow Streamlit UI entry point.
 
 Business logic lives in the ``excel_flow`` package.
-Phase 7 focuses on UI/UX polish for the demo experience.
 """
 
 from __future__ import annotations
