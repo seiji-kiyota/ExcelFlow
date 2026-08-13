@@ -1,7 +1,7 @@
 """ExcelFlow Streamlit UI entry point.
 
 Business logic lives in the ``excel_flow`` package.
-Phase 6 adds Excel export for Step 5.
+Phase 7 focuses on UI/UX polish for the demo experience.
 """
 
 from __future__ import annotations
@@ -64,11 +64,15 @@ st.set_page_config(
 )
 
 st.title("ExcelFlow")
-st.caption("Excel / CSV 業務自動化ツール")
-st.info(
-    "現在の開発状況：**Phase 6（Excel出力）** — "
-    "読込・整形・集計・グラフ・Excel出力まで利用できます。"
+st.markdown(
+    "Excel / CSV の**読込・整形・集計・グラフ・Excel出力**を、"
+    "ブラウザ上で行える業務自動化ツールです。"
 )
+st.caption(
+    "操作の流れ：Step 1 ファイル読込 → Step 2 データ整形 → "
+    "Step 3 集計 → Step 4 グラフ → Step 5 Excel出力"
+)
+st.info("動作確認には `sample_data` フォルダ内のサンプルデータを利用できます。")
 
 AGGREGATION_OPTIONS = {
     "合計": "sum",
@@ -79,37 +83,6 @@ AGGREGATION_OPTIONS = {
 }
 
 AGGREGATION_RESULT_WIDTH = 800
-
-
-def _handle_aggregation_reset() -> None:
-    """Button callback: runs before widgets are created on the next run."""
-    reset_aggregation_state(st.session_state)
-    st.session_state["aggregation_reset_notice"] = True
-
-
-def _handle_chart_reset() -> None:
-    """Button callback: clear Phase 5 only, keep aggregation results."""
-    reset_chart_state(st.session_state)
-    st.session_state["chart_reset_notice"] = True
-
-
-def _handle_export_reset() -> None:
-    """Button callback: clear Phase 6 only, keep upstream results."""
-    reset_export_state(st.session_state)
-    st.session_state["export_reset_notice"] = True
-
-
-def _ensure_chart_widget_defaults(aggregation_config: dict) -> None:
-    """Set Phase 5 widget defaults before widgets are instantiated."""
-    defaults = chart_settings_from_aggregation(aggregation_config)
-    if CHART_TYPE_KEY not in st.session_state:
-        st.session_state[CHART_TYPE_KEY] = "棒グラフ"
-    if CHART_X_KEY not in st.session_state:
-        st.session_state[CHART_X_KEY] = defaults["x_column"]
-    if CHART_Y_KEY not in st.session_state:
-        st.session_state[CHART_Y_KEY] = defaults["y_column"]
-    if CHART_TITLE_KEY not in st.session_state:
-        st.session_state[CHART_TITLE_KEY] = defaults["title"]
 
 
 def _reset_cleaning_state() -> None:
@@ -125,6 +98,43 @@ def _reset_cleaning_state() -> None:
     reset_aggregation_state(st.session_state)
 
 
+def _handle_cleaning_reset() -> None:
+    """Button callback: clear cleaning results and dependent downstream state."""
+    _reset_cleaning_state()
+    st.session_state["cleaning_reset_notice"] = True
+
+
+def _handle_aggregation_reset() -> None:
+    """Button callback: runs before widgets are created on the next run."""
+    reset_aggregation_state(st.session_state)
+    st.session_state["aggregation_reset_notice"] = True
+
+
+def _handle_chart_reset() -> None:
+    """Button callback: clear chart state only, keep aggregation results."""
+    reset_chart_state(st.session_state)
+    st.session_state["chart_reset_notice"] = True
+
+
+def _handle_export_reset() -> None:
+    """Button callback: clear export state only, keep upstream results."""
+    reset_export_state(st.session_state)
+    st.session_state["export_reset_notice"] = True
+
+
+def _ensure_chart_widget_defaults(aggregation_config: dict) -> None:
+    """Set chart widget defaults before widgets are instantiated."""
+    defaults = chart_settings_from_aggregation(aggregation_config)
+    if CHART_TYPE_KEY not in st.session_state:
+        st.session_state[CHART_TYPE_KEY] = "棒グラフ"
+    if CHART_X_KEY not in st.session_state:
+        st.session_state[CHART_X_KEY] = defaults["x_column"]
+    if CHART_Y_KEY not in st.session_state:
+        st.session_state[CHART_Y_KEY] = defaults["y_column"]
+    if CHART_TITLE_KEY not in st.session_state:
+        st.session_state[CHART_TITLE_KEY] = defaults["title"]
+
+
 def _init_rename_mapping() -> dict[str, str]:
     if "rename_mapping" not in st.session_state:
         st.session_state.rename_mapping = {}
@@ -132,8 +142,8 @@ def _init_rename_mapping() -> dict[str, str]:
 
 
 # --- STEP 1 ---
-st.header("① ファイルを読み込む")
-st.write("ExcelまたはCSVファイルを選択してください。")
+st.header("Step 1　ファイル読込")
+st.write("Excel（.xlsx）または CSV（.csv）ファイルを選択してください。")
 
 uploaded_file = st.file_uploader(
     "Excel（.xlsx）または CSV（.csv）",
@@ -174,7 +184,7 @@ if uploaded_file is not None:
         row_count = len(original_df)
         column_count = len(original_df.columns)
 
-        st.success(f"{row_count:,}行 × {column_count:,}列を読み込みました")
+        st.success("ファイルを読み込みました。")
 
         info_cols = st.columns(4 if selected_sheet else 3)
         info_cols[0].metric("ファイル名", uploaded_file.name)
@@ -196,7 +206,7 @@ if uploaded_file is not None:
         st.error(exc.user_message)
         original_df = None
     except Exception:
-        st.error("ファイルの読み込み中に予期しないエラーが発生しました。")
+        st.error("ファイルを読み込めませんでした。")
         original_df = None
 else:
     st.session_state.pop("loaded_file_key", None)
@@ -207,80 +217,84 @@ else:
 st.divider()
 
 # --- STEP 2 ---
-st.header("② データを整える")
-st.write("不要列の削除、空白行・重複行の除去、文字列の前後空白除去などを行います。")
+st.header("Step 2　データ整形")
+st.write("不要列の削除、列名変更、空白行・重複行の除去、文字列の前後空白除去を行います。")
 
 if original_df is None:
-    st.info("先にファイルを読み込んでください。")
+    st.info("データ整形を行うには、先にStep 1でファイルを読み込んでください。")
 else:
+    if st.session_state.pop("cleaning_reset_notice", False):
+        st.success("整形結果をリセットしました。")
+
     rename_mapping = _init_rename_mapping()
 
-    columns_to_drop = st.multiselect(
-        "削除する列",
-        options=list(original_df.columns.astype(str)),
-        default=[],
-        help="削除したい列を選択します。すべての列は削除できません。",
-    )
+    clean_controls, _clean_spacer = st.columns([2, 1])
+    with clean_controls:
+        columns_to_drop = st.multiselect(
+            "削除する列",
+            options=list(original_df.columns.astype(str)),
+            default=[],
+            help="削除したい列を選択します。すべての列は削除できません。",
+        )
 
-    with st.expander("列名を変更する", expanded=False):
-        available_sources = [
-            column
-            for column in original_df.columns.astype(str)
-            if column not in rename_mapping
-        ]
-        col_a, col_b, col_c = st.columns([2, 2, 1])
-        with col_a:
-            rename_source = st.selectbox(
-                "変更する列",
-                options=available_sources or [""],
-                disabled=not available_sources,
-                key="rename_source_select",
-            )
-        with col_b:
-            rename_target = st.text_input("新しい列名", key="rename_target_input")
-        with col_c:
-            st.write("")
-            st.write("")
-            add_rename = st.button("変更を追加", use_container_width=True)
+        with st.expander("列名を変更する", expanded=False):
+            available_sources = [
+                column
+                for column in original_df.columns.astype(str)
+                if column not in rename_mapping
+            ]
+            col_a, col_b, col_c = st.columns([2, 2, 1])
+            with col_a:
+                rename_source = st.selectbox(
+                    "変更する列",
+                    options=available_sources or [""],
+                    disabled=not available_sources,
+                    key="rename_source_select",
+                )
+            with col_b:
+                rename_target = st.text_input("新しい列名", key="rename_target_input")
+            with col_c:
+                st.write("")
+                st.write("")
+                add_rename = st.button("変更を追加", use_container_width=True)
 
-        if add_rename:
-            try:
-                if not available_sources:
-                    st.warning("変更できる列がありません。")
-                else:
-                    candidate = {**rename_mapping, str(rename_source): rename_target}
-                    validated = validate_rename_mapping(original_df, candidate)
-                    st.session_state.rename_mapping = validated
-                    st.rerun()
-            except ExcelFlowError as exc:
-                st.error(exc.user_message)
+            if add_rename:
+                try:
+                    if not available_sources:
+                        st.warning("変更できる列がありません。")
+                    else:
+                        candidate = {**rename_mapping, str(rename_source): rename_target}
+                        validated = validate_rename_mapping(original_df, candidate)
+                        st.session_state.rename_mapping = validated
+                        st.rerun()
+                except ExcelFlowError as exc:
+                    st.error(exc.user_message)
 
-        if rename_mapping:
-            st.caption("変更予定一覧")
-            for source, target in list(rename_mapping.items()):
-                item_cols = st.columns([4, 1])
-                item_cols[0].write(f"`{source}` → `{target}`")
-                if item_cols[1].button("削除", key=f"remove_rename_{source}"):
-                    rename_mapping.pop(source, None)
-                    st.session_state.rename_mapping = rename_mapping
-                    st.rerun()
+            if rename_mapping:
+                st.caption("変更予定一覧")
+                for source, target in list(rename_mapping.items()):
+                    item_cols = st.columns([4, 1])
+                    item_cols[0].write(f"`{source}` → `{target}`")
+                    if item_cols[1].button("削除", key=f"remove_rename_{source}"):
+                        rename_mapping.pop(source, None)
+                        st.session_state.rename_mapping = rename_mapping
+                        st.rerun()
 
-    check_cols = st.columns(3)
-    with check_cols[0]:
-        strip_whitespace = st.checkbox("文字列の前後空白を削除", value=False)
-    with check_cols[1]:
-        remove_blank_rows = st.checkbox("空白行を削除", value=False)
-    with check_cols[2]:
-        remove_duplicates = st.checkbox("重複行を削除", value=False)
+        check_cols = st.columns(3)
+        with check_cols[0]:
+            strip_whitespace = st.checkbox("文字列の前後空白を削除", value=False)
+        with check_cols[1]:
+            remove_blank_rows = st.checkbox("空白行を削除", value=False)
+        with check_cols[2]:
+            remove_duplicates = st.checkbox("重複行を削除", value=False)
 
-    action_cols = st.columns(2)
-    run_cleaning = action_cols[0].button("データ整形を実行", type="primary")
-    reset_cleaning = action_cols[1].button("整形をリセット", type="secondary")
-
-    if reset_cleaning:
-        _reset_cleaning_state()
-        st.success("整形結果をリセットしました。元データからやり直せます。")
-        st.rerun()
+        action_cols = st.columns(2)
+        run_cleaning = action_cols[0].button("データ整形を実行", type="primary")
+        action_cols[1].button(
+            "整形をリセット",
+            type="secondary",
+            on_click=_handle_cleaning_reset,
+        )
 
     if run_cleaning:
         try:
@@ -304,11 +318,11 @@ else:
                 "remove_duplicates": remove_duplicates,
             }
             reset_aggregation_state(st.session_state)
-            st.success("データ整形が完了しました。")
+            st.success("データ整形を実行しました。")
         except ExcelFlowError as exc:
             st.error(exc.user_message)
         except Exception:
-            st.error("データ整形中に予期しないエラーが発生しました。")
+            st.error("データ整形を実行できませんでした。")
 
     cleaned_df = st.session_state.get("cleaned_df")
     summary = st.session_state.get("cleaning_summary")
@@ -347,11 +361,11 @@ else:
 st.divider()
 
 # --- STEP 3 ---
-st.header("③ 集計する")
+st.header("Step 3　集計")
 st.write("グループ項目と集計方法を指定して、データを集計します。")
 
 if original_df is None:
-    st.info("先にファイルを読み込んでください。")
+    st.info("集計を行うには、先にStep 1でファイルを読み込んでください。")
 else:
     cleaned_df = st.session_state.get("cleaned_df")
     if cleaned_df is not None:
@@ -364,9 +378,9 @@ else:
     if st.session_state.pop("aggregation_reset_notice", False):
         st.success("集計結果をリセットしました。")
 
-    st.info(f"集計対象：**{source_label}**（{len(source_df):,}行 × {len(source_df.columns):,}列）")
+    st.caption(f"集計対象：{source_label}（{len(source_df):,}行 × {len(source_df.columns):,}列）")
 
-    # Keep Phase 4 controls compact (not full-page width).
+    # Keep aggregation controls compact (not full-page width).
     controls_left, _controls_spacer = st.columns([2, 1])
     with controls_left:
         group_columns = st.multiselect(
@@ -377,6 +391,8 @@ else:
             help="集計の軸となる列を1〜2つ選択します。",
             key=AGGREGATION_GROUP_KEY,
         )
+        if not group_columns:
+            st.caption("集計する項目を選択してください。")
 
         method_col, value_col_ui = st.columns(2)
         with method_col:
@@ -396,7 +412,7 @@ else:
                 st.caption("件数：グループごとの行数を集計します。")
             else:
                 if not numeric_columns:
-                    st.warning("数値列がないため、合計・平均・最大・最小は実行できません。")
+                    st.warning("対象となる数値列がありません。")
                 value_column = st.selectbox(
                     "集計対象列",
                     options=numeric_columns or [""],
@@ -448,11 +464,11 @@ else:
                 ),
             }
             reset_chart_state(st.session_state)
-            st.success("集計が完了しました。")
+            st.success("集計を実行しました。")
         except ExcelFlowError as exc:
             st.error(exc.user_message)
         except Exception:
-            st.error("集計中に予期しないエラーが発生しました。")
+            st.error("集計を実行できませんでした。")
 
     aggregated_df = st.session_state.get("aggregated_df")
     aggregation_config = st.session_state.get("aggregation_config")
@@ -498,14 +514,16 @@ else:
 st.divider()
 
 # --- STEP 4 ---
-st.header("④ グラフで確認する")
-st.write("集計結果をもとに棒グラフ・折れ線グラフ・円グラフを表示します。")
+st.header("Step 4　グラフ")
+st.write("Step 3の集計結果をもとに、棒グラフ・折れ線グラフ・円グラフを作成します。")
 
 aggregated_df = st.session_state.get("aggregated_df")
 aggregation_config = st.session_state.get("aggregation_config")
 
-if aggregated_df is None or aggregation_config is None:
-    st.info("先に③集計するで集計を実行してください。")
+if original_df is None:
+    st.info("グラフを作成するには、先にStep 1でファイルを読み込んでください。")
+elif aggregated_df is None or aggregation_config is None:
+    st.info("グラフを作成するには、先にStep 3で集計を実行してください。")
 else:
     if st.session_state.pop("chart_reset_notice", False):
         st.success("グラフ設定をリセットしました。")
@@ -552,7 +570,7 @@ else:
             st.warning("円グラフは1つのグループ項目で集計した場合に利用できます。")
 
         chart_action_cols = st.columns(2)
-        run_chart = chart_action_cols[0].button("グラフを表示", type="primary")
+        run_chart = chart_action_cols[0].button("グラフを作成", type="primary")
         chart_action_cols[1].button(
             "グラフをリセット",
             type="secondary",
@@ -588,11 +606,11 @@ else:
             }
             st.session_state.chart_generated = True
             reset_export_state(st.session_state)
-            st.success("グラフを表示しました。")
+            st.success("グラフを作成しました。")
         except ExcelFlowError as exc:
             st.error(exc.user_message)
         except Exception:
-            st.error("グラフ表示中に予期しないエラーが発生しました。")
+            st.error("グラフを作成できませんでした。")
 
     if st.session_state.get("chart_generated") and st.session_state.get("chart_config"):
         try:
@@ -615,16 +633,16 @@ else:
         except ExcelFlowError as exc:
             st.error(exc.user_message)
         except Exception:
-            st.error("グラフ表示中に予期しないエラーが発生しました。")
+            st.error("グラフを作成できませんでした。")
 
 st.divider()
 
 # --- STEP 5 ---
-st.header("⑤ Excelへ出力する")
+st.header("Step 5　Excel出力")
 st.write("整形済データ・集計結果・処理履歴を Excel ファイルとしてダウンロードします。")
 
 if original_df is None:
-    st.info("先にファイルを読み込んでください。")
+    st.info("Excel出力を行うには、先にStep 1でファイルを読み込んでください。")
 else:
     if st.session_state.pop("export_reset_notice", False):
         st.success("出力設定をリセットしました。")
@@ -635,10 +653,12 @@ else:
     export_source_df = cleaned_df if cleaned_df is not None else original_df
     export_source_label = "整形済データ" if cleaned_df is not None else "元データ"
 
-    st.info(
-        f"出力対象：**{export_source_label}**"
+    st.caption(
+        f"出力対象：{export_source_label}"
         f"（{len(export_source_df):,}行 × {len(export_source_df.columns):,}列）"
     )
+    if aggregated_df is None:
+        st.caption("集計結果シートは、Step 3で集計を実行すると出力できます。")
 
     if EXPORT_FILENAME_KEY not in st.session_state:
         st.session_state[EXPORT_FILENAME_KEY] = generate_default_filename()
@@ -738,4 +758,4 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-st.caption("ExcelFlow Ver1.0 — Phase 6: Excel出力")
+st.caption("ExcelFlow Ver1.0")
